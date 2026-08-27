@@ -69,6 +69,13 @@ func main() {
 		os.Exit(1)
 	}
 
+	// ---- 关停信号：关闭即摘除就绪探针 ----
+	// shutdownCh 由退出信号触发关闭；/readyz 在其关闭后返回 503，
+	// 部署平台据此停止下发新流量，避免关停期间仍承接请求。
+	shutdownCh := make(chan struct{})
+	healthHandler := httpapi.NewHealthHandler()
+	healthHandler.SetShutdownCh(shutdownCh)
+
 	// ---- HTTP 层 ----
 	handler := httpapi.NewRouter(httpapi.Deps{
 		Cfg:                cfg,
@@ -81,7 +88,7 @@ func main() {
 		TaskHandler:        httpapi.NewTaskHandler(taskSvc),
 		CommandHandler:     httpapi.NewCommandHandler(cmdSvc),
 		OverviewHandler:    httpapi.NewOverviewHandler(ovSvc),
-		HealthHandler:      httpapi.NewHealthHandler(),
+		HealthHandler:      healthHandler,
 		AuditHandler:       httpapi.NewAuditHandler(auditSvc),
 	})
 
@@ -120,6 +127,7 @@ func main() {
 	select {
 	case err := <-errCh:
 		logger.Error("HTTP 服务异常退出", "error", err)
+		closeShutdown(shutdownCh)
 		cancel()
 		wg.Wait()
 		os.Exit(1)
@@ -127,6 +135,9 @@ func main() {
 		logger.Info("收到退出信号，开始优雅关闭", "signal", sig.String())
 	}
 
+	// 先摘除就绪探针（/readyz → 503），部署平台停止下发新流量；
+	// 再取消扫描 context：后台扫描不再重发指令、不再升级任务、扫描时间停止推进。
+	closeShutdown(shutdownCh)
 	cancel()
 	wg.Wait()
 
@@ -136,6 +147,19 @@ func main() {
 		logger.Error("HTTP 服务关闭异常", "error", err)
 	}
 	logger.Info("服务已关闭")
+}
+
+// closeShutdown 关闭关停信号通道；已关闭则忽略（允许多次/异常路径调用）。
+func closeShutdown(ch chan struct{}) {
+	if ch == nil {
+		return
+	}
+	select {
+	case <-ch:
+		// 已关闭
+	default:
+		close(ch)
+	}
 }
 
 // newLogger 依据 LOG_LEVEL 构造 JSON 结构化日志。
