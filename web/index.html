@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>航标灯遥测遥控服务</title>
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+  <header class="app-header">
+    <div class="brand">
+      <span class="brand-mark">🛰️</span>
+      <div>
+        <h1>航标灯遥测遥控服务</h1>
+        <p class="brand-sub">Navigation Beacon Telemetry &amp; Remote Control</p>
+      </div>
+    </div>
+    <nav class="app-nav" id="app-nav">
+      <a href="/" data-route="/">航标总览</a>
+      <a href="/abnormalities" data-route="/abnormalities">异常台账</a>
+      <a href="/tasks" data-route="/tasks">处置任务</a>
+      <a href="/commands" data-route="/commands">遥控记录</a>
+    </nav>
+    <div class="header-status" id="header-status" title="服务健康状态">--</div>
+  </header>
+
+  <main id="app" class="app-main">
+    <div class="loading">加载中…</div>
+  </main>
+
+  <footer class="app-footer">
+    <span>航标灯遥测遥控服务 · 灯质校验 / 低电预警 / 漂移守卫 / 指令重发</span>
+    <span id="footer-clock"></span>
+  </footer>
+
+  <script src="/api.js"></script>
+  <script src="/hooks/use-beacons.js"></script>
+  <script src="/hooks/use-tasks.js"></script>
+  <script src="/components/beacon-card.js"></script>
+  <script src="/components/telemetry-chart.js"></script>
+  <script src="/components/command-panel.js"></script>
+  <script src="/app.js"></script>
+</body>
+</html>
