@@ -67,7 +67,11 @@ func (b *Beacon) Validate() error {
 }
 
 // EffectiveStatus 依据最近遥测时间推导展示状态（离线判定）。
+// 从未上报过遥测（LastTelemetryAt 为空）视为离线。
 func (b *Beacon) EffectiveStatus(now time.Time, offlineAfter time.Duration) BeaconStatus {
+	if b.LastTelemetryAt == nil {
+		return BeaconStatusOffline
+	}
 	if now.Sub(*b.LastTelemetryAt) > offlineAfter {
 		return BeaconStatusOffline
 	}
@@ -75,7 +79,11 @@ func (b *Beacon) EffectiveStatus(now time.Time, offlineAfter time.Duration) Beac
 }
 
 // LampOffDuration 返回当前连续灭灯时长，未灭灯时返回 0。
+// 从未记录灭灯起点（LampOffSince 为空）时返回 0。
 func (b *Beacon) LampOffDuration(now time.Time) time.Duration {
+	if b.LampOffSince == nil {
+		return 0
+	}
 	d := now.Sub(*b.LampOffSince)
 	if d < 0 {
 		return 0

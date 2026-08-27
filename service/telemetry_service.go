@@ -198,6 +198,5 @@ func (s *TelemetryService) ListTelemetry(beaconID string, limit int) ([]*domain.
 }
 
 func cloneBeacon(b *domain.Beacon) *domain.Beacon {
-	c := *b
-	return &c
+	return b.Clone()
 }

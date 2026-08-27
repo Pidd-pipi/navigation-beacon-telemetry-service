@@ -21,10 +21,13 @@ func (b *Beacon) Clone() *Beacon {
 }
 
 // Clone 返回遥测数据实体的深拷贝。
+// 灯灭遥测允许 measured_pattern 为空，此时不克隆指针，避免空指针解引用。
 func (t *TelemetryData) Clone() *TelemetryData {
 	c := *t
-	p := *t.MeasuredPattern
-	c.MeasuredPattern = &p
+	if t.MeasuredPattern != nil {
+		p := *t.MeasuredPattern
+		c.MeasuredPattern = &p
+	}
 	if t.Violations != nil {
 		c.Violations = append([]string(nil), t.Violations...)
 	}
@@ -32,9 +35,10 @@ func (t *TelemetryData) Clone() *TelemetryData {
 }
 
 // Clone 返回异常实体的深拷贝。
+// resolved_at 必须深拷贝，避免多个副本共享同一个 *time.Time 指针而互相串改解决时间。
 func (a *LampAbnormality) Clone() *LampAbnormality {
 	c := *a
-	c.ResolvedAt = a.ResolvedAt
+	c.ResolvedAt = cloneTime(a.ResolvedAt)
 	return &c
 }
 

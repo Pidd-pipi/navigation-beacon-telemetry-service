@@ -144,8 +144,7 @@ func (s *AbnormalityService) Get(id string) (*domain.LampAbnormality, error) {
 func (s *AbnormalityService) CountOpen() int { return s.store.CountOpenAbnormalities() }
 
 func cloneAbnormality(a *domain.LampAbnormality) *domain.LampAbnormality {
-	c := *a
-	return &c
+	return a.Clone()
 }
 
 // TouchOpen 刷新某航标某类型未解决异常的最后发现时间（异常持续存在）。
