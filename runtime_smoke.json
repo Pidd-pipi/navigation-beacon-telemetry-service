@@ -1,0 +1,10 @@
+{
+  "mode": "service",
+  "start": "go run .",
+  "ready_url": "/healthz",
+  "project_intro": "基于 Go 实现的航标灯遥测遥控全栈 Web 项目，一款后端服务，完成航标灯台账、遥测采集、灯质异常诊断、遥控指令下发与巡检工单闭环。",
+  "env": {
+    "PORT": "19090",
+    "DATA_FILE": "/tmp/nav-beacon-smoke.json"
+  }
+}
