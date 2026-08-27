@@ -108,6 +108,16 @@ func (s *Store) Load() error {
 	if snap.Telemetry != nil {
 		s.telemetry = snap.Telemetry
 	}
+	// 加载后对每座航标遥测应用保留策略：旧版本（或 MaxTelemetryPerBeacon=0
+	// 期间运行）累积的超量历史会在重启后整批涌回内存，导致卡顿与「重启后又
+	// 冒出来」。这里裁剪到最新的 DefaultRetention 条，老的不再堆着。
+	if DefaultRetention > 0 {
+		for bid, items := range s.telemetry {
+			if len(items) > DefaultRetention {
+				s.telemetry[bid] = retainLatestTelemetry(items, DefaultRetention)
+			}
+		}
+	}
 	if snap.Abnormalities != nil {
 		s.abnormalities = snap.Abnormalities
 	}

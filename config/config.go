@@ -34,7 +34,7 @@ func Default() *Config {
 		TelemetryPeriod:     15 * time.Minute, // 遥测上报周期
 		OfflineAfter:        45 * time.Minute, // 超过该时长无遥测判定离线
 		AuditRetention:      2000,             // 审计日志保留条数
-		MaxTelemetryPerBeacon: 0,             // 单航标遥测保留条数（0 表示不裁剪）
+		MaxTelemetryPerBeacon: 200,           // 单航标遥测保留条数（0 表示不裁剪；默认 200 ≈ 15min 周期下约 2 天，与趋势图窗口一致）
 	}
 }
 
@@ -131,6 +131,9 @@ func (c *Config) Validate() error {
 	}
 	if c.AuditRetention < 0 {
 		return fmt.Errorf("AUDIT_RETENTION 不能为负")
+	}
+	if c.MaxTelemetryPerBeacon < 0 {
+		return fmt.Errorf("MAX_TELEMETRY_PER_BEACON 不能为负")
 	}
 	return nil
 }
