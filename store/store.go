@@ -6,6 +6,7 @@ package store
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -15,6 +16,9 @@ import (
 
 	"example.com/navigation-beacon-telemetry-service/domain"
 )
+
+// ErrNotFound 表示原子更新时未找到目标记录，供 service 层映射为 NotFound。
+var ErrNotFound = errors.New("store: record not found")
 
 // Store 内存仓储根对象，持有全部实体的索引。
 type Store struct {
@@ -191,6 +195,23 @@ func (s *Store) Mutate(fn func()) error {
 	s.mu.Lock()
 	fn()
 	s.mu.Unlock()
+	return s.Save()
+}
+
+// MutateFn 在写锁下执行带返回值的变更：fn 在写锁内运行，
+// 返回 error 时中止本次变更（不落盘，调用方应保证 fn 失败时不修改状态），
+// 返回 nil 时按「改完即存」原子落盘。
+//
+// 用于「读取-校验-迁移-写回」这类必须原子完成的状态机操作：
+// fn 内读取的始终是锁内实时记录，避免并发请求在「读取与校验」之间穿插，
+// 导致同一动作被并发执行两遍（如重复回执、重复派发）。
+func (s *Store) MutateFn(fn func() error) error {
+	s.mu.Lock()
+	err := fn()
+	s.mu.Unlock()
+	if err != nil {
+		return err
+	}
 	return s.Save()
 }
 

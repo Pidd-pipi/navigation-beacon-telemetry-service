@@ -13,6 +13,47 @@ func (s *Store) UpsertTask(t *domain.DisposalTask) error {
 	})
 }
 
+// UpdateTaskInPlace 在写锁内读取实时任务记录，交给 fn 做状态迁移后落盘。
+// 用于 Assign/Repair/Verify/Close/Escalate 等「读取-校验-迁移-写回」原子操作：
+// 并发派发/复测/关闭在同一把写锁内串行，第二个请求进入时能看到前一个的迁移结果，
+// 从而被状态机拒绝，避免同一任务被并发执行两遍。
+// 返回迁移后记录的拷贝，未找到时返回 (nil, ErrNotFound)。
+func (s *Store) UpdateTaskInPlace(id string, fn func(*domain.DisposalTask) error) (*domain.DisposalTask, error) {
+	var out *domain.DisposalTask
+	err := s.MutateFn(func() error {
+		cur := s.tasks[id]
+		if cur == nil {
+			return ErrNotFound
+		}
+		if err := fn(cur); err != nil {
+			return err
+		}
+		out = cur.Clone()
+		return nil
+	})
+	return out, err
+}
+
+// CreateTaskIfAbsent 在写锁内检查某异常是否已有「进行中」任务，
+// 没有则插入新任务并落盘，已有则返回 (existing, false, nil)。
+// 用于 CreateManual/CreateForAbnormality 的「查重 + 创建」原子化，
+// 避免并发创建出两条任务（同一件事被并发做两遍）。
+func (s *Store) CreateTaskIfAbsent(t *domain.DisposalTask) (created *domain.DisposalTask, inserted bool, err error) {
+	err = s.MutateFn(func() error {
+		for _, existing := range s.tasks {
+			if existing.AbnormalityID == t.AbnormalityID && existing.Open() {
+				created = existing.Clone()
+				return nil
+			}
+		}
+		s.tasks[t.ID] = t
+		created = t.Clone()
+		inserted = true
+		return nil
+	})
+	return created, inserted, err
+}
+
 // GetTask 按 ID 查询任务。
 func (s *Store) GetTask(id string) *domain.DisposalTask {
 	s.mu.RLock()

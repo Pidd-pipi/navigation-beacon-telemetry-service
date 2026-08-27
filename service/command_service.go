@@ -1,6 +1,7 @@
 package service
 
 import (
+	"errors"
 	"fmt"
 	"time"
 
@@ -8,6 +9,10 @@ import (
 	"example.com/navigation-beacon-telemetry-service/domain"
 	"example.com/navigation-beacon-telemetry-service/store"
 )
+
+// errCommandAlreadySettled 表示指令在并发窗口内已被 Ack/标记失败，
+// 本次重发/失败标记应跳过。内部哨兵，不外泄为业务错误。
+var errCommandAlreadySettled = errors.New("command already settled, skip")
 
 // CommandService 遥控指令服务：下发、回执、超时重发。
 type CommandService struct {
@@ -62,21 +67,23 @@ func (s *CommandService) Dispatch(beaconID string, ct domain.CommandType, target
 }
 
 // Ack 处理终端回执。
+//
+// 整个「读取当前状态 → 校验是否可回执（Pending）→ 置位成功/失败 → 写回」
+// 在仓储写锁内原子完成：并发到达的两份回执会在锁内串行，后者进入时能读到前者
+// 已经置位的状态，从而被 Ack 的「不可重复回执」拒绝。任一方都不应越过状态机。
 func (s *CommandService) Ack(commandID string, success bool, message, operator string, now time.Time) (*domain.RemoteCommand, error) {
-	cmd := s.store.GetCommand(commandID)
-	if cmd == nil {
-		return nil, domain.NotFound("指令 %s 不存在", commandID)
-	}
 	status := domain.AckStatusFailed
 	if success {
 		status = domain.AckStatusSuccess
 	}
-	updated := cloneCommand(cmd)
-	if err := updated.Ack(status, message, now); err != nil {
+	updated, err := s.store.UpdateCommandInPlace(commandID, func(cmd *domain.RemoteCommand) error {
+		return cmd.Ack(status, message, now)
+	})
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return nil, domain.NotFound("指令 %s 不存在", commandID)
+		}
 		return nil, domain.Conflict("回执处理失败: %v", err)
-	}
-	if err := s.store.UpsertCommand(updated); err != nil {
-		return nil, domain.Internal("保存指令失败: %v", err)
 	}
 	s.audit.LogAt(now, "command.ack", "command", commandID, operator,
 		fmt.Sprintf("指令 %s 回执: %s（%s）", commandID, status.Label(), message))
@@ -85,15 +92,24 @@ func (s *CommandService) Ack(commandID string, success bool, message, operator s
 
 // ResendDue 扫描待回执指令：超时自动重发（最多 CommandMaxRetries 次），
 // 重试耗尽仍无回执则标记失败并告警。返回重发数与失败数。
+//
+// 每条指令的重发/标记失败走 UpdateCommandInPlace 原子完成，与并发的 Ack 互斥：
+// 若 Ack 已先行置位，Resend 在锁内读取到的实时状态非 pending 即跳过，
+// 不会对一个已被回执的指令重复重发。
 func (s *CommandService) ResendDue(now time.Time) (resent, failed int) {
 	for _, cmd := range s.store.ListPendingCommands() {
 		if !cmd.IsOverdue(now) {
 			continue
 		}
 		if cmd.RetryCount < s.cfg.CommandMaxRetries {
-			updated := cloneCommand(cmd)
-			updated.Resend(now, s.cfg.CommandAckTimeout)
-			if err := s.store.UpsertCommand(updated); err != nil {
+			updated, err := s.store.UpdateCommandInPlace(cmd.ID, func(c *domain.RemoteCommand) error {
+				if !c.Pending() {
+					return errCommandAlreadySettled
+				}
+				c.Resend(now, s.cfg.CommandAckTimeout)
+				return nil
+			})
+			if err != nil {
 				continue
 			}
 			s.audit.LogAt(now, "command.resend", "command", updated.ID, "sweeper",
@@ -101,9 +117,14 @@ func (s *CommandService) ResendDue(now time.Time) (resent, failed int) {
 			resent++
 			continue
 		}
-		updated := cloneCommand(cmd)
-		updated.MarkFailed("回执超时且重试耗尽", now)
-		if err := s.store.UpsertCommand(updated); err != nil {
+		updated, err := s.store.UpdateCommandInPlace(cmd.ID, func(c *domain.RemoteCommand) error {
+			if !c.Pending() {
+				return errCommandAlreadySettled
+			}
+			c.MarkFailed("回执超时且重试耗尽", now)
+			return nil
+		})
+		if err != nil {
 			continue
 		}
 		s.audit.LogAt(now, "command.failed_alert", "command", updated.ID, "sweeper",
@@ -139,9 +160,4 @@ func (s *CommandService) Get(id string) (*domain.RemoteCommand, error) {
 		return nil, domain.NotFound("指令 %s 不存在", id)
 	}
 	return c, nil
-}
-
-func cloneCommand(c *domain.RemoteCommand) *domain.RemoteCommand {
-	cp := *c
-	return &cp
 }

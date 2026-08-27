@@ -14,6 +14,27 @@ func (s *Store) UpsertCommand(c *domain.RemoteCommand) error {
 	})
 }
 
+// UpdateCommandInPlace 在写锁内读取实时指令记录，交给 fn 做状态迁移后落盘。
+// 用于 Ack/Resend/MarkFailed 等「读取-校验-迁移-写回」原子操作：
+// fn 拿到的是锁内实时指针（非拷贝），并发回执/重发在同一把写锁内串行，
+// 第二个请求进入时能看到前一个的状态变更，从而被状态机（Pending/状态迁移）拒绝。
+// 返回迁移后记录的拷贝，未找到时返回 (nil, ErrNotFound)。
+func (s *Store) UpdateCommandInPlace(id string, fn func(*domain.RemoteCommand) error) (*domain.RemoteCommand, error) {
+	var out *domain.RemoteCommand
+	err := s.MutateFn(func() error {
+		cur := s.commands[id]
+		if cur == nil {
+			return ErrNotFound
+		}
+		if err := fn(cur); err != nil {
+			return err
+		}
+		out = cur.Clone()
+		return nil
+	})
+	return out, err
+}
+
 // GetCommand 按 ID 查询指令。
 func (s *Store) GetCommand(id string) *domain.RemoteCommand {
 	s.mu.RLock()
