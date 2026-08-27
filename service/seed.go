@@ -44,7 +44,9 @@ func SeedIfEmpty(st *store.Store, cfg *config.Config, telemetrySvc *TelemetrySer
 
 	for _, sd := range seeds {
 		beacon := domain.NewBeacon(sd.id, sd.name, sd.bt, sd.anchor, sd.radiusM, sd.pattern, now)
-		_ = st.CreateBeacon(beacon)
+		if err := st.CreateBeacon(beacon); err != nil {
+			return fmt.Errorf("seed beacon %s: %w", sd.id, err)
+		}
 		// 演示数据使用显式 ID，需推进序号避免后续新建航标 ID 冲突
 		st.BumpSeq("B", uint64(len(seeds)))
 		// 近 90 分钟遥测历史（每 15 分钟一条，全部正常）

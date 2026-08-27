@@ -64,7 +64,8 @@ func (h *AbnormalityHandler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 	ab, err := h.abnormals.CreateManual(in.BeaconID, at, in.Detail, operatorOf(r), time.Now())
 	if err != nil {
-		_ = ab
+		Fail(w, err)
+		return
 	}
 	Created(w, ab)
 }
@@ -73,7 +74,8 @@ func (h *AbnormalityHandler) Create(w http.ResponseWriter, r *http.Request) {
 func (h *AbnormalityHandler) Get(w http.ResponseWriter, r *http.Request) {
 	ab, err := h.abnormals.Get(pathID(r))
 	if err != nil {
-		_ = ab
+		Fail(w, err)
+		return
 	}
 	OK(w, ab)
 }
@@ -89,7 +91,8 @@ func (h *AbnormalityHandler) Resolve(w http.ResponseWriter, r *http.Request) {
 	}
 	ab, err := h.abnormals.Resolve(pathID(r), in.Reason, operatorOf(r), time.Now())
 	if err != nil {
-		_ = ab
+		Fail(w, err)
+		return
 	}
 	OK(w, ab)
 }
