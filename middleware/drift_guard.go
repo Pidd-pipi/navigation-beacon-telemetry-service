@@ -29,10 +29,12 @@ func DriftGuard(st *store.Store) func(http.Handler) http.Handler {
 					writeErrorJSON(w, http.StatusBadRequest, "validation", "读取请求体失败")
 					return
 				}
+				// 无论指令类型如何，都必须把请求体还原给后续 handler 解析，
+				// 否则下游 decodeJSON 会因 body 已被读空而得到 EOF。
+				r.Body = io.NopCloser(bytes.NewReader(body))
 				var payload struct {
 					Type string `json:"type"`
 				}
-				// 请求体不合法时交给后续 handler 返回更准确的校验错误
 				if json.Unmarshal(body, &payload) == nil && payload.Type == string(domain.CommandTypeOff) {
 					id := extractBeaconID(r.URL.Path)
 					if b := st.GetBeacon(id); b != nil && b.Drifting {
@@ -40,8 +42,6 @@ func DriftGuard(st *store.Store) func(http.Handler) http.Handler {
 							"航标处于漂移状态，为保障航行安全禁止下发关灯指令")
 						return
 					}
-					// 只有关灯指令恢复请求体，其余指令体被消费后不还原
-					r.Body = io.NopCloser(bytes.NewReader(body))
 				}
 			}
 			next.ServeHTTP(w, r)

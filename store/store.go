@@ -102,13 +102,16 @@ func (s *Store) Load() error {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.beacons = snap.Beacons
-	s.telemetry = snap.Telemetry
-	s.abnormalities = snap.Abnormalities
-	s.tasks = snap.Tasks
-	s.commands = snap.Commands
-	s.audits = snap.Audits
-	s.seq = snap.Seq
+	// 持久化文件中数组/映射字段可能为 null（或字段缺失），此时反序列化得到 nil。
+	// 若不归一化为空集合，后续写入（如 s.beacons[id]=b、s.seq[prefix]++）会触发
+	// "assignment to entry in nil map" / "index out of range" 运行时 panic。
+	s.beacons = orEmptyBeaconMap(snap.Beacons)
+	s.telemetry = orEmptyTelemetryMap(snap.Telemetry)
+	s.abnormalities = orEmptyAbnormalityMap(snap.Abnormalities)
+	s.tasks = orEmptyTaskMap(snap.Tasks)
+	s.commands = orEmptyCommandMap(snap.Commands)
+	s.audits = orEmptyAuditSlice(snap.Audits)
+	s.seq = orEmptySeqMap(snap.Seq)
 	return nil
 }
 
@@ -144,6 +147,13 @@ func (s *Store) Save() error {
 		return fmt.Errorf("创建临时文件失败: %w", err)
 	}
 	tmpName := tmp.Name()
+	// 成功 rename 前，任何异常路径都要清理临时文件，避免数据目录残留 .tmp。
+	renamed := false
+	defer func() {
+		if !renamed {
+			_ = os.Remove(tmpName)
+		}
+	}()
 
 	if _, err := tmp.Write(payload); err != nil {
 		_ = tmp.Close()
@@ -159,6 +169,7 @@ func (s *Store) Save() error {
 	if err := os.Rename(tmpName, s.path); err != nil {
 		return fmt.Errorf("原子替换持久化文件失败: %w", err)
 	}
+	renamed = true
 
 	// 同步目录项，确保 rename 结果在掉电后仍然可见。
 	if d, err := os.Open(dir); err == nil {
@@ -203,4 +214,54 @@ func (s *Store) BumpSeq(prefix string, count uint64) {
 	if s.seq[prefix] < count {
 		s.seq[prefix] = count
 	}
+}
+
+// orEmptyBeaconMap 确保返回非 nil map，避免反序列化得到 nil 后写入 panic。
+func orEmptyBeaconMap(m map[string]*domain.Beacon) map[string]*domain.Beacon {
+	if m == nil {
+		return make(map[string]*domain.Beacon)
+	}
+	return m
+}
+
+func orEmptyTelemetryMap(m map[string][]*domain.TelemetryData) map[string][]*domain.TelemetryData {
+	if m == nil {
+		return make(map[string][]*domain.TelemetryData)
+	}
+	return m
+}
+
+func orEmptyAbnormalityMap(m map[string]*domain.LampAbnormality) map[string]*domain.LampAbnormality {
+	if m == nil {
+		return make(map[string]*domain.LampAbnormality)
+	}
+	return m
+}
+
+func orEmptyTaskMap(m map[string]*domain.DisposalTask) map[string]*domain.DisposalTask {
+	if m == nil {
+		return make(map[string]*domain.DisposalTask)
+	}
+	return m
+}
+
+func orEmptyCommandMap(m map[string]*domain.RemoteCommand) map[string]*domain.RemoteCommand {
+	if m == nil {
+		return make(map[string]*domain.RemoteCommand)
+	}
+	return m
+}
+
+func orEmptyAuditSlice(s []*domain.AuditLog) []*domain.AuditLog {
+	if s == nil {
+		return make([]*domain.AuditLog, 0, 64)
+	}
+	return s
+}
+
+func orEmptySeqMap(m map[string]uint64) map[string]uint64 {
+	if m == nil {
+		return make(map[string]uint64)
+	}
+	return m
 }
